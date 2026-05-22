@@ -51,14 +51,27 @@ It also still accepts the older `jsk_recognition_msgs/BoundingBoxArray` shape if
 
 ### Control Topics
 
+The control script matches the provided `ctrl6_20260423_131927_0.mcap` topic set.
+
+Core controller topics:
+
 - `/novatel/oem7/odom` (`nav_msgs/msg/Odometry`)
 - `/lat_ctrl_perf` (`geometry_msgs/msg/Vector3Stamped`)
 - `/ctrl_ref_twist` (`geometry_msgs/msg/TwistStamped`)
 - `/lat_ctrl_cmd` (`geometry_msgs/msg/Vector3Stamped`)
 - `/ctrl_ref_curv` (`geometry_msgs/msg/PointStamped`)
+- `/ctrl_ref_pose` (`geometry_msgs/msg/PoseStamped`)
 - `/steer_ctrl_cmd` (`geometry_msgs/msg/Vector3Stamped`)
+- `/protection_levels` (`geometry_msgs/msg/Vector3Stamped`)
 
-Control topic constants may include or omit the leading `/`.
+Raptor DBW topics extracted when present:
+
+- `/raptor_dbw_interface/misc_report`
+- `/raptor_dbw_interface/steering_report`
+- `/raptor_dbw_interface/steering_cmd`
+- `/raptor_dbw_interface/accelerator_pedal_cmd`
+- `/raptor_dbw_interface/brake_cmd`
+- `/raptor_dbw_interface/global_enable_cmd`
 
 ### Run
 
