@@ -20,6 +20,9 @@ EXTRACTION_DATE = "11252025"   # e.g., run date token you want in the root folde
 # Option 2: Process all ROS 2 bags in a folder
 BAG_FOLDER = None  # e.g. "/path/to/bags"; set to None to use BAG_FILE
 BAG_FILE = None  # e.g. "/path/to/recording.mcap"
+if os.environ.get("AVA_BAG_FILE"):
+    BAG_FILE = os.environ["AVA_BAG_FILE"]
+    BAG_FOLDER = None
 # Folder search options
 SEARCH_RECURSIVELY = True  # Set to True to search all subdirectories, False for top-level only
 
@@ -42,7 +45,8 @@ FRAME_RATE        = 10.0     # output video FPS
 # Verbosity and debugging
 VERBOSE                = True        # print progress messages during processing
 DEBUG_FIRST_N_OBJECTS  = 0           # set to >0 to process only first N objects (by sorted ID)
-TRAJECTORY_ONLY        = True        # skip camera frames / MP4 when opencv is unavailable
+TRAJECTORY_ONLY        = False       # set True to skip camera frames / MP4
+FRAME_MATCH_BUFFER_S   = 2.0        # seconds around each track for image extraction
 
 # Note: Label 9999 (unclassified_radar_detection) objects are automatically excluded from
 # tracking and video extraction, but are included in key metrics summary
@@ -92,13 +96,24 @@ ensure_dir(INTERMEDIATE_OUT)
 
 # ====== UTILITIES ======================================================
 _cv2 = None
+_deps_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".deps")
 
 def _get_cv2():
     global _cv2
     if _cv2 is None:
+        import sys
+        if os.path.isdir(_deps_path) and _deps_path not in sys.path:
+            sys.path.insert(0, _deps_path)
         import cv2 as _cv2_mod
         _cv2 = _cv2_mod
     return _cv2
+
+def opencv_available():
+    try:
+        _get_cv2()
+        return True
+    except ImportError:
+        return False
 
 try:
     from cv_bridge import CvBridge
@@ -714,22 +729,23 @@ def step6_write_key_metrics_csv(metrics, bag_basename, bag_out_dir):
 
 # ====== STEP 7: EXTRACT FRAMES PER OBJECT (±2s buffer) ================
 def step7_extract_frames(bag, trajs, bag_basename, bag_out_dir):
-    # Build per-object time windows
+    # Match on detection/image header time (same clock as trajectories), not bag record time.
     ranges = {}
     for tid, rows in trajs.items():
         if not rows:
             continue
-        tmins = [r['rosbagtime_int'] for r in rows]
-        t0, t1 = min(tmins) - 2, max(tmins) + 2
+        times = [r['time'] for r in rows]
+        t0, t1 = min(times) - FRAME_MATCH_BUFFER_S, max(times) + FRAME_MATCH_BUFFER_S
         ranges[tid] = (t0, t1)
 
-    # Walk the camera stream once and write frames for tids in range
+    frames_written = 0
     if VERBOSE:
-        print("[INFO] Extracting frames for {} objects...".format(len(ranges)))
+        print("[INFO] Extracting frames for {} objects (header-time match)...".format(len(ranges)))
     for topic, msg, t in bag.read_messages(topics=[TOPIC_CAMERA_IMG]):
-        ts = t.to_sec(); ts_i = int(ts); ms = int(ts * 1000.0)
+        ts = stamp_to_sec(getattr(msg.header, 'stamp', None), fallback=t.to_sec())
+        ms = int(ts * 1000.0)
         for tid, (lo, hi) in ranges.items():
-            if lo <= ts_i <= hi:
+            if lo <= ts <= hi:
                 obj_dir = os.path.join(bag_out_dir, "{}_{}".format(bag_basename, tid))
                 cam_dir = os.path.join(obj_dir, "camera")
                 ensure_dir(cam_dir)
@@ -737,7 +753,9 @@ def step7_extract_frames(bag, trajs, bag_basename, bag_out_dir):
                 out_path = os.path.join(cam_dir, "frame_{}.png".format(ms))
                 if not _get_cv2().imwrite(out_path, img):
                     print("[WARN] Failed to write {}".format(out_path))
-    print("[OK] Frame extraction complete.")
+                else:
+                    frames_written += 1
+    print("[OK] Frame extraction complete ({} frames written).".format(frames_written))
 
 # ====== STEP 7.5: MAKE PER-OBJECT FOLDERS, CSV, PLOTS =================
 def step7p_finalize_objects(trajs, bag_basename, bag_out_dir):
@@ -887,16 +905,17 @@ def process_single_bag(bag_path):
             step6_write_key_metrics_csv(metrics, bag_basename, bag_out_dir)
             step7p_finalize_objects(trajs, bag_basename, bag_out_dir)
             if not TRAJECTORY_ONLY:
-                try:
+                if opencv_available():
                     step7_extract_frames(bag, trajs, bag_basename, bag_out_dir)
-                except ImportError as e:
-                    print("[WARN] Skipping frame extraction (opencv not installed): {}".format(e))
+                else:
+                    print("[WARN] Skipping frame extraction: install opencv "
+                          "(python3 -m pip install --target=.deps opencv-python-headless)")
         
         if not TRAJECTORY_ONLY:
-            try:
+            if opencv_available():
                 step8_make_videos_and_copy_odom(bag_basename, bag_out_dir)
-            except ImportError as e:
-                print("[WARN] Skipping video generation (opencv not installed): {}".format(e))
+            else:
+                print("[WARN] Skipping video generation: opencv not available")
         print("=== Completed: {} ===".format(os.path.basename(os.path.normpath(bag_path))))
         return True
         
