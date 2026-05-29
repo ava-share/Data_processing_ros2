@@ -185,13 +185,20 @@ def read_messages_rosbags(uri, topics=None):
         sys.path[:] = saved_path
 
 
+def _use_rosbags_for_type(msg_type):
+    """Use embedded MCAP schemas when installed ROS types are missing or mismatched."""
+    if not msg_type:
+        return False
+    return msg_type.startswith(("yolo_msgs/", "raptor_dbw_msgs/"))
+
+
 def iter_topic_messages(bag, topic):
     """
-    Read messages for one topic, using rosbags for yolo_msgs when available.
+    Read messages for one topic, using rosbags for custom msgs when available.
     """
     bag._load_topic_metadata()
     msg_type = bag._topic_types.get(topic) or bag._topic_types.get(normalize_topic(topic))
-    if msg_type and msg_type.startswith("yolo_msgs/"):
+    if _use_rosbags_for_type(msg_type):
         try:
             yield from read_messages_rosbags(bag.uri, topics=[topic])
             return

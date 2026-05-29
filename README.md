@@ -10,18 +10,20 @@ Python pipelines for extracting perception and control data from ROS 2 Jazzy bag
 
 ### Setup
 
-Source ROS 2 and any workspace that contains the custom message packages used by the bag:
+Source ROS 2 Jazzy (and `yolo_ws` for perception bags if needed):
 
 ```bash
 source /opt/ros/jazzy/setup.bash   # or ~/ros2_jazzy/install/setup.bash
 source /path/to/your/ros2_ws/install/setup.bash   # e.g. ~/yolo_ws/install/setup.bash
 python3 -m pip install numpy matplotlib opencv-python
 
-# YOLO MCAP bags: install rosbags into project-local .deps (schema from bag, not workspace)
-python3 -m pip install --target=.deps 'numpy<2' rosbags
+# MCAP bags with custom msgs: project-local .deps (rosbags + opencv for perception frames)
+python3 -m pip install --target=.deps 'numpy<2' rosbags opencv-python-headless
 ```
 
-For the detection YOLO bags, `yolo_msgs` in the workspace is still required for topic discovery. `/fused_bbox` deserialization uses **rosbags** and the schema embedded in the MCAP file when the installed `yolo_msgs` layout does not match the recording.
+Control bags under `/home/atlab/Downloads/April23Testing` do not require a separate `raptor_dbw_msgs` install when `.deps` includes rosbags.
+
+For custom message types, topic discovery still uses `rosbag2_py`. Deserialization falls back to **rosbags** and the schema embedded in the MCAP file when the installed ROS package is missing or mismatched (`yolo_msgs`, `raptor_dbw_msgs`).
 
 ### Bag Input
 
@@ -40,7 +42,16 @@ BAG_FOLDER = "/path/to/folder/of/bags"
 SEARCH_RECURSIVELY = True
 ```
 
+Override without editing the script:
+
+```bash
+export AVA_BAG_FOLDER="/home/atlab/Downloads/April23Testing"
+export AVA_BAG_FILE="/path/to/one/recording.mcap"   # single bag; takes precedence over AVA_BAG_FOLDER
+```
+
 Supported inputs are ROS 2 bag directories with `metadata.yaml`, standalone `.mcap` files, and standalone `.db3` files.
+
+The control pipeline is currently configured for the April 23, 2026 ctrl6 bags under `/home/atlab/Downloads/April23Testing` (five recordings: `ctrl6_20260423_131927` through `ctrl6_20260423_150017`).
 
 ### Perception Topics
 
@@ -80,14 +91,15 @@ Raptor DBW topics extracted when present:
 
 ```bash
 ./run-perception-pipeline.sh   # sources ROS + yolo_ws, then data-pipeline.py
+./run-control-pipeline.sh      # sources ROS 2 Jazzy, then control-data-pipeline.py
 python3 data-pipeline.py       # if ROS is already sourced
 python3 control-data-pipeline.py
 ```
 
-Set `BAG_FILE` or `BAG_FOLDER` at the top of `data-pipeline.py`. Use `TRAJECTORY_ONLY = True` to skip camera/MP4 steps when OpenCV is not installed.
+Set `BAG_FILE` or `BAG_FOLDER` at the top of each script, or use `AVA_BAG_FILE` / `AVA_BAG_FOLDER`. Use `TRAJECTORY_ONLY = True` in the perception script to skip camera/MP4 steps when OpenCV is not installed.
 
 Perception results go to `Extracted_data_{EXTRACTION_DATE}/` and `Intermediate_data_{EXTRACTION_DATE}/`.
-Control results go to `Control_data_{EXTRACTION_DATE}/`.
+Control results go to `Control_data_{EXTRACTION_DATE}/` (currently `Control_data_05292026/` for the April 23 testing batch).
 
 ### Notes
 

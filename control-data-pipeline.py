@@ -8,22 +8,25 @@ import matplotlib
 matplotlib.use('Agg')   # headless
 import matplotlib.pyplot as plt
 
-from ros2_bag_utils import Ros2Bag, normalize_topic, stamp_to_sec
+from ros2_bag_utils import Ros2Bag, normalize_topic, stamp_to_sec, iter_topic_messages
 
 # ====== CONFIG =========================================================
-EXTRACTION_DATE = "12172025"   # e.g., run date token you want in the root folder name
+EXTRACTION_DATE = "05292026"   # e.g., run date token you want in the root folder name
 
 # BATCH PROCESSING: Set one of these options
 # Option 1: Process single ROS 2 bag directory, .db3, or .mcap file
-BAG_FILE = "/home/avresearch/Downloads/ctrl6_20260423_131927_0.mcap"
-BAG_FOLDER = None
-SEARCH_RECURSIVELY = True
+# BAG_FILE = "/path/to/ctrl6_20260423_131927_0.mcap"
 
-# # Option 2: Process all ROS 2 bags in a folder
-# BAG_FOLDER = "/home/avresearch/Downloads/perception_output_planning_2025-11-20_11-20-12"  # Set to None to use single file
-# BAG_FILE = None  # Set to None to use folder processing
-# Folder search options
-# SEARCH_RECURSIVELY = True searches all subdirectories; False searches only the top-level folder.
+# Option 2: Process all ROS 2 bags in a folder
+BAG_FOLDER = "/home/atlab/Downloads/April23Testing"
+BAG_FILE = None
+if os.environ.get("AVA_BAG_FILE"):
+    BAG_FILE = os.environ["AVA_BAG_FILE"]
+    BAG_FOLDER = None
+elif os.environ.get("AVA_BAG_FOLDER"):
+    BAG_FOLDER = os.environ["AVA_BAG_FOLDER"]
+    BAG_FILE = None
+SEARCH_RECURSIVELY = True  # True searches all subdirectories; False searches only the top-level folder.
 
 
 # Control topics in the ctrl6 MCAP bag
@@ -323,7 +326,7 @@ def step7_dump_raptor_dbw_csvs(bag, bag_basename, bag_out_dir):
         with open(out_csv, 'w') as f:
             w = csv.writer(f)
             w.writerow(header)
-            for _, msg, t in bag.read_messages(topics=[topic]):
+            for _, msg, t in iter_topic_messages(bag, topic):
                 msg_count += 1
                 w.writerow(row_fn(msg, t))
                 if VERBOSE and (msg_count % 2000 == 0):
