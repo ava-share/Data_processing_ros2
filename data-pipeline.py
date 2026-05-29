@@ -3,13 +3,12 @@
 
 import os, sys, csv, math, shutil, errno, glob
 import fnmatch
-import cv2
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')   # headless
 import matplotlib.pyplot as plt
 
-from ros2_bag_utils import Ros2Bag, stamp_to_sec
+from ros2_bag_utils import Ros2Bag, stamp_to_sec, iter_topic_messages
 
 # ====== CONFIG =========================================================
 EXTRACTION_DATE = "11252025"   # e.g., run date token you want in the root folder name
@@ -19,8 +18,8 @@ EXTRACTION_DATE = "11252025"   # e.g., run date token you want in the root folde
 # BAG_FILE = "/media/avresearch/RouteData/perception_output_2025-09-11_15-09-03"
 
 # Option 2: Process all ROS 2 bags in a folder
-BAG_FOLDER = "/home/avresearch/Downloads"  # Set to None to use single file
-BAG_FILE = None  # Set to None to use folder processing
+BAG_FOLDER = None  # e.g. "/path/to/bags"; set to None to use BAG_FILE
+BAG_FILE = None  # e.g. "/path/to/recording.mcap"
 # Folder search options
 SEARCH_RECURSIVELY = True  # Set to True to search all subdirectories, False for top-level only
 
@@ -42,7 +41,8 @@ FRAME_RATE        = 10.0     # output video FPS
 
 # Verbosity and debugging
 VERBOSE                = True        # print progress messages during processing
-DEBUG_FIRST_N_OBJECTS  = 2           # set to >0 to process only first N objects (by sorted ID)
+DEBUG_FIRST_N_OBJECTS  = 0           # set to >0 to process only first N objects (by sorted ID)
+TRAJECTORY_ONLY        = True        # skip camera frames / MP4 when opencv is unavailable
 
 # Note: Label 9999 (unclassified_radar_detection) objects are automatically excluded from
 # tracking and video extraction, but are included in key metrics summary
@@ -91,6 +91,15 @@ ensure_dir(ROOT_OUT)
 ensure_dir(INTERMEDIATE_OUT)
 
 # ====== UTILITIES ======================================================
+_cv2 = None
+
+def _get_cv2():
+    global _cv2
+    if _cv2 is None:
+        import cv2 as _cv2_mod
+        _cv2 = _cv2_mod
+    return _cv2
+
 try:
     from cv_bridge import CvBridge
     _BRIDGE = CvBridge()
@@ -203,7 +212,7 @@ def detection_to_csv_row(msg, detection, bag_time):
     ]
 
 def choose_fourcc_h264():
-    return cv2.VideoWriter_fourcc(*'avc1')  # try H.264 first
+    return _get_cv2().VideoWriter_fourcc(*'avc1')  # try H.264 first
 
 def plot_xy(ts, xs, ys, out_path, title):
     plt.figure()
@@ -248,7 +257,7 @@ def step1_dump_fused_bbox_csv(bag, bag_basename):
     with open(out_csv, 'w') as f:
         w = csv.writer(f)
         w.writerow(['frame_id','timestamp','x','y','z','dx','dy','dz','label'])
-        for topic, msg, t in bag.read_messages(topics=[TOPIC_FUSED_BBOX]):
+        for topic, msg, t in iter_topic_messages(bag, TOPIC_FUSED_BBOX):
             msg_count += 1
             detections = getattr(msg, 'detections', None)
             if detections is None:
@@ -726,7 +735,7 @@ def step7_extract_frames(bag, trajs, bag_basename, bag_out_dir):
                 ensure_dir(cam_dir)
                 img = convert_img_to_cv2(msg)
                 out_path = os.path.join(cam_dir, "frame_{}.png".format(ms))
-                if not cv2.imwrite(out_path, img):
+                if not _get_cv2().imwrite(out_path, img):
                     print("[WARN] Failed to write {}".format(out_path))
     print("[OK] Frame extraction complete.")
 
@@ -766,7 +775,8 @@ def step7p_finalize_objects(trajs, bag_basename, bag_out_dir):
 
 # ====== STEP 8: MAKE WEB-PLAYABLE MP4s ================================
 def step8_make_videos_and_copy_odom(bag_basename, bag_out_dir):
-    # Videos
+    # Videos (requires opencv)
+    cv2 = _get_cv2()
     for name in sorted(os.listdir(bag_out_dir)):
         obj_dir = os.path.join(bag_out_dir, name)
         if not os.path.isdir(obj_dir): continue
@@ -876,9 +886,17 @@ def process_single_bag(bag_path):
             metrics = step4_calculate_key_metrics(odom_csv, metadata, trajs, fused_csv)
             step6_write_key_metrics_csv(metrics, bag_basename, bag_out_dir)
             step7p_finalize_objects(trajs, bag_basename, bag_out_dir)
-            step7_extract_frames(bag, trajs, bag_basename, bag_out_dir)
+            if not TRAJECTORY_ONLY:
+                try:
+                    step7_extract_frames(bag, trajs, bag_basename, bag_out_dir)
+                except ImportError as e:
+                    print("[WARN] Skipping frame extraction (opencv not installed): {}".format(e))
         
-        step8_make_videos_and_copy_odom(bag_basename, bag_out_dir)
+        if not TRAJECTORY_ONLY:
+            try:
+                step8_make_videos_and_copy_odom(bag_basename, bag_out_dir)
+            except ImportError as e:
+                print("[WARN] Skipping video generation (opencv not installed): {}".format(e))
         print("=== Completed: {} ===".format(os.path.basename(os.path.normpath(bag_path))))
         return True
         

@@ -137,3 +137,64 @@ class Ros2Bag(object):
                 msg_classes[msg_type] = get_message(msg_type)
 
             yield topic, deserialize_message(data, msg_classes[msg_type]), BagTime(timestamp_ns)
+
+
+def _rosbags_deps_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), ".deps")
+
+
+def read_messages_rosbags(uri, topics=None):
+    """
+    Yield (topic, msg, BagTime) using rosbags and schemas embedded in the bag.
+    Used when installed ROS types do not match the recorded yolo_msgs layout.
+    """
+    import sys
+    from pathlib import Path
+
+    deps = _rosbags_deps_path()
+    if not os.path.isdir(deps):
+        raise ImportError(
+            "rosbags not found in {}; install with: "
+            "python3 -m pip install --target=.deps 'numpy<2' rosbags".format(deps)
+        )
+
+    saved_path = sys.path[:]
+    try:
+        if deps not in sys.path:
+            sys.path.insert(0, deps)
+        from rosbags.highlevel import AnyReader
+
+        selected = None
+        if topics is not None:
+            selected = set()
+            for topic in topics:
+                selected.add(topic)
+                selected.add(normalize_topic(topic))
+
+        with AnyReader([Path(uri)]) as reader:
+            connections = reader.connections
+            if selected is not None:
+                connections = [
+                    conn for conn in connections
+                    if conn.topic in selected or normalize_topic(conn.topic) in selected
+                ]
+            for conn, timestamp_ns, rawdata in reader.messages(connections=connections):
+                msg = reader.deserialize(rawdata, conn.msgtype)
+                yield conn.topic, msg, BagTime(timestamp_ns)
+    finally:
+        sys.path[:] = saved_path
+
+
+def iter_topic_messages(bag, topic):
+    """
+    Read messages for one topic, using rosbags for yolo_msgs when available.
+    """
+    bag._load_topic_metadata()
+    msg_type = bag._topic_types.get(topic) or bag._topic_types.get(normalize_topic(topic))
+    if msg_type and msg_type.startswith("yolo_msgs/"):
+        try:
+            yield from read_messages_rosbags(bag.uri, topics=[topic])
+            return
+        except ImportError as exc:
+            print("[WARN] rosbags unavailable ({}); falling back to rclpy deserialize".format(exc))
+    yield from bag.read_messages(topics=[topic])

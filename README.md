@@ -13,12 +13,15 @@ Python pipelines for extracting perception and control data from ROS 2 Jazzy bag
 Source ROS 2 and any workspace that contains the custom message packages used by the bag:
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source /path/to/your/ros2_ws/install/setup.bash
+source /opt/ros/jazzy/setup.bash   # or ~/ros2_jazzy/install/setup.bash
+source /path/to/your/ros2_ws/install/setup.bash   # e.g. ~/yolo_ws/install/setup.bash
 python3 -m pip install numpy matplotlib opencv-python
+
+# YOLO MCAP bags: install rosbags into project-local .deps (schema from bag, not workspace)
+python3 -m pip install --target=.deps 'numpy<2' rosbags
 ```
 
-For the detection YOLO bags, `yolo_msgs` must be available so `/fused_bbox` can deserialize.
+For the detection YOLO bags, `yolo_msgs` in the workspace is still required for topic discovery. `/fused_bbox` deserialization uses **rosbags** and the schema embedded in the MCAP file when the installed `yolo_msgs` layout does not match the recording.
 
 ### Bag Input
 
@@ -76,9 +79,12 @@ Raptor DBW topics extracted when present:
 ### Run
 
 ```bash
-python3 data-pipeline.py
+./run-perception-pipeline.sh   # sources ROS + yolo_ws, then data-pipeline.py
+python3 data-pipeline.py       # if ROS is already sourced
 python3 control-data-pipeline.py
 ```
+
+Set `BAG_FILE` or `BAG_FOLDER` at the top of `data-pipeline.py`. Use `TRAJECTORY_ONLY = True` to skip camera/MP4 steps when OpenCV is not installed.
 
 Perception results go to `Extracted_data_{EXTRACTION_DATE}/` and `Intermediate_data_{EXTRACTION_DATE}/`.
 Control results go to `Control_data_{EXTRACTION_DATE}/`.
